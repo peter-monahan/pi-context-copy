@@ -58,3 +58,36 @@ test("context-fork creates a detached session and restores the selected prompt",
   assert.deepEqual(target.buildSessionContext().messages.map((message) => message.role), ["user"]);
   assert.equal(editorText, "restore this");
 });
+
+test("context-clone copies the active effective context and opens an empty editor", async () => {
+  const source = SessionManager.inMemory("/workspace");
+  source.appendMessage({ role: "user", content: "active context", timestamp: 1 });
+  const { pi, commands } = fakePi();
+  extension(pi);
+
+  let target: SessionManager | undefined;
+  let editorText: string | undefined;
+  const context = {
+    model: { provider: "openai-codex", id: "gpt-5.3-codex" },
+    sessionManager: source,
+    waitForIdle: async () => {},
+    newSession: async (options?: Parameters<ExtensionCommandContext["newSession"]>[0]) => {
+      target = SessionManager.inMemory("/workspace");
+      await options?.setup?.(target);
+      await options?.withSession?.({
+        ui: {
+          setEditorText(value: string) { editorText = value; },
+          notify() {},
+        },
+      } as never);
+      return { cancelled: false };
+    },
+    ui: { notify() {} },
+  } as unknown as ExtensionCommandContext;
+
+  await commands.get("context-clone")?.handler("", context);
+
+  assert.ok(target);
+  assert.deepEqual(target.buildSessionContext().messages.map((message) => message.role), ["user"]);
+  assert.equal(editorText, "");
+});

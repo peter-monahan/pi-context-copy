@@ -43,7 +43,7 @@ export function planContextFork(
   if (selected.type !== "message" || selected.message.role !== "user") {
     throw new Error("Context forks require a user prompt entry");
   }
-  return planContextCopy(entries, "fork", selectedPromptId, selected.parentId, userMessageText(selected.message.content), configuration);
+  return planContextCopy(entries, "fork", selectedPromptId, selected.parentId, restorableUserPromptText(selected.message.content), configuration);
 }
 
 export function planContextClone(
@@ -241,10 +241,12 @@ function firstMaterializedId(entries: readonly SessionEntry[], ids: ReadonlyMap<
   return undefined;
 }
 
-function userMessageText(content: unknown): string {
+function restorableUserPromptText(content: unknown): string {
   if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content.flatMap((part: unknown) => isTextPart(part) ? [part.text] : []).join("");
+  if (!Array.isArray(content) || content.some((part: unknown) => !isTextPart(part))) {
+    throw new Error("Context forks currently require a text-only user prompt");
+  }
+  return content.map((part: { type: "text"; text: string }) => part.text).join("");
 }
 
 function isTextPart(value: unknown): value is { type: "text"; text: string } {

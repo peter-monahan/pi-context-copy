@@ -108,6 +108,24 @@ test("materialization creates independent canonical context with rewritten entry
   });
 });
 
+test("a fork rejects prompts whose non-text content cannot be restored as an editor draft", () => {
+  const source = SessionManager.inMemory("/workspace");
+  const selectedId = source.appendMessage({
+    role: "user",
+    content: [
+      { type: "text", text: "Inspect this image" },
+      { type: "image", data: "base64-data", mimeType: "image/png" },
+    ],
+    timestamp: 1,
+  });
+
+  assert.throws(() => planContextFork(source.getEntries(), selectedId, {
+    sourceSessionId: source.getSessionId(),
+    model: null,
+    thinkingLevel: "off",
+  }), /text-only user prompt/);
+});
+
 test("invalid source context is rejected before mutating the detached target", () => {
   const invalidEntry = {
     type: "message",
