@@ -1,0 +1,42 @@
+{
+  "name": "pi-context-copy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Detached, point-in-time context forks and clones for Pi",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/peter-monahan/pi-context-copy.git"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "keywords": ["pi-package"],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepare": "npm run build",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "pi": {
+    "extensions": ["./src/extension.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.80.7"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.80.7",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.0"
+  }
+}
