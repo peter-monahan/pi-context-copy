@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { SessionManager, buildSessionContext, type SessionEntry } from "@earendil-works/pi-coding-agent";
 import { materializeContextCopy, planContextClone, planContextFork } from "../src/index.ts";
@@ -106,6 +109,26 @@ test("materialization creates independent canonical context with rewritten entry
     sourcePointEntryId: source.getEntry(selectedPromptId)?.parentId,
     sourceCompactionId: plan.sourceCompactionId,
   });
+});
+
+test("a user-only context clone is immediately durable as canonical Pi JSONL", async () => {
+  const source = SessionManager.inMemory("/workspace");
+  const leafId = source.appendMessage({ role: "user", content: "persist this context", timestamp: 1 });
+  const plan = planContextClone(source.getEntries(), leafId, {
+    sourceSessionId: source.getSessionId(),
+    model: null,
+    thinkingLevel: "medium",
+  });
+  const directory = await mkdtemp(join(tmpdir(), "pi-context-copy-durable-"));
+  const target = SessionManager.create("/workspace", directory);
+
+  materializeContextCopy(plan, target);
+
+  const sessionFile = target.getSessionFile();
+  assert.ok(sessionFile);
+  const reopened = SessionManager.open(sessionFile, directory);
+  assert.deepEqual(reopened.buildSessionContext().messages.map((message) => message.role), ["user"]);
+  assert.equal(reopened.getHeader()?.parentSession, undefined);
 });
 
 test("a fork rejects prompts whose non-text content cannot be restored as an editor draft", () => {

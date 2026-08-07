@@ -1,3 +1,4 @@
+import { existsSync, writeFileSync } from "node:fs";
 import { buildContextEntries, } from "@earendil-works/pi-coding-agent";
 export function planContextFork(entries, selectedPromptId, configuration) {
     const selected = uniqueEntry(entries, selectedPromptId);
@@ -47,6 +48,7 @@ export function materializeContextCopy(plan, target) {
         sourcePointEntryId: plan.sourcePointEntryId,
         ...(plan.sourceCompactionId === undefined ? {} : { sourceCompactionId: plan.sourceCompactionId }),
     });
+    persistUnflushedSession(target);
     return { draft: plan.draft, entryIds };
 }
 function planContextCopy(entries, mode, sourceEntryId, pointLeafId, draft, configuration) {
@@ -129,6 +131,20 @@ function uniqueEntry(entries, id) {
     if (matches.length !== 1)
         throw new Error(matches.length === 0 ? `Session entry not found: ${id}` : `Duplicate session entry ID: ${id}`);
     return matches[0];
+}
+function persistUnflushedSession(manager) {
+    if (!manager.isPersisted())
+        return;
+    const path = manager.getSessionFile();
+    if (!path)
+        throw new Error("Persisted context-copy target has no session file");
+    if (existsSync(path))
+        return;
+    const header = manager.getHeader();
+    if (!header)
+        throw new Error("Context-copy session header is unavailable");
+    const jsonl = [header, ...manager.getEntries()].map((entry) => JSON.stringify(entry)).join("\n");
+    writeFileSync(path, `${jsonl}\n`, { flag: "wx" });
 }
 function validateMaterializationPlan(plan) {
     if (plan.compaction && !plan.retainedEntries.some(isMaterializedContextEntry)) {

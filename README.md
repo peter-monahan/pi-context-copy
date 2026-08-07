@@ -45,7 +45,7 @@ import {
 } from "pi-context-copy";
 ```
 
-The exported planner is pure over Pi `SessionEntry` values. `materializeContextCopy()` writes a validated plan into an empty, detached `SessionManager`, rebases session entry IDs and ancestry, and preserves effective model context. A browser or concurrent runtime remains responsible for staging, ownership acquisition, atomic publication, activation, and rollback around that write.
+The exported planner is pure over Pi `SessionEntry` values. `materializeContextCopy()` writes a validated plan into an empty, detached `SessionManager`, rebases session entry IDs and ancestry, preserves effective model context, and immediately flushes persistent user-only/summary-only copies that Pi would otherwise defer until an assistant message. A browser or concurrent runtime remains responsible for staging, ownership acquisition, atomic publication, activation, and rollback around that write.
 
 ## Development
 
