@@ -131,6 +131,141 @@ test("a user-only context clone is immediately durable as canonical Pi JSONL", a
   assert.equal(reopened.getHeader()?.parentSession, undefined);
 });
 
+test("context replacements and omissions keep their model-visible semantics", () => {
+  const source = SessionManager.inMemory("/workspace");
+  const replacedId = source.appendMessage({ role: "user", content: "sensitive request", timestamp: 1 });
+  source.appendContextEdit(replacedId, { content: "sanitized request" });
+  const omittedId = source.appendMessage(assistant("discard this answer", 2));
+  const leafId = source.appendContextEdit(omittedId, null);
+
+  const plan = planContextClone(source.getEntries(), leafId, {
+    sourceSessionId: source.getSessionId(),
+    model: null,
+    thinkingLevel: "medium",
+  });
+  const target = SessionManager.inMemory("/workspace");
+  materializeContextCopy(plan, target);
+
+  assert.deepEqual(messageView(target.buildSessionContext().messages), messageView(source.buildSessionContext().messages));
+  const copiedEdits = target.getEntries().filter((entry) => entry.type === "context_edit");
+  assert.equal(copiedEdits.length, 2);
+  assert.ok(copiedEdits.every((entry) => target.getEntry(entry.targetId)?.id === entry.targetId));
+});
+
+test("compaction copies preserve the effective system checkpoint and usage", () => {
+  const source = SessionManager.inMemory("/workspace");
+  source.appendMessage({ role: "system", content: "Use the reviewed tools only.", timestamp: 1 });
+  const keptId = source.appendMessage({ role: "user", content: "kept request", timestamp: 2 });
+  source.appendMessage({ role: "system", content: "Prefer concise output.", timestamp: 3 });
+  source.appendMessage(assistant("kept answer", 4));
+  const summaryUsage = assistant("unused", 5).usage;
+  source.appendCompaction("earlier work", keptId, 120, undefined, false, summaryUsage);
+  const leafId = source.appendMessage({ role: "user", content: "continue", timestamp: 6 });
+
+  const plan = planContextClone(source.getEntries(), leafId, {
+    sourceSessionId: source.getSessionId(),
+    model: null,
+    thinkingLevel: "high",
+  });
+  const target = SessionManager.inMemory("/workspace");
+  materializeContextCopy(plan, target);
+
+  assert.deepEqual(messageView(target.buildSessionContext().messages), messageView(source.buildSessionContext().messages));
+  const copiedCompaction = target.getEntries().find((entry) => entry.type === "compaction");
+  assert.deepEqual(copiedCompaction?.usage, summaryUsage);
+  assert.equal(
+    copiedCompaction?.systemMessage?.content,
+    "Use the reviewed tools only.\n\nPrefer concise output.",
+  );
+});
+
+test("usage-only entries stay outside copied model context", () => {
+  const source = SessionManager.inMemory("/workspace");
+  source.appendMessage({ role: "user", content: "before usage", timestamp: 1 });
+  source.appendUsage("cache_warm", "openai-codex", "gpt-test", assistant("unused", 2).usage);
+  const leafId = source.appendMessage(assistant("after usage", 3));
+
+  const plan = planContextClone(source.getEntries(), leafId, {
+    sourceSessionId: source.getSessionId(),
+    model: null,
+    thinkingLevel: "off",
+  });
+  const target = SessionManager.inMemory("/workspace");
+  materializeContextCopy(plan, target);
+
+  assert.deepEqual(messageView(target.buildSessionContext().messages), messageView(source.buildSessionContext().messages));
+  assert.ok(!target.getEntries().some((entry) => entry.type === "usage"));
+});
+
+test("an unavailable context-edit target fails before mutating the detached target", () => {
+  const source = SessionManager.inMemory("/workspace");
+  const summarizedId = source.appendMessage({ role: "user", content: "summarized away", timestamp: 1 });
+  const keptId = source.appendMessage({ role: "user", content: "kept request", timestamp: 2 });
+  source.appendCompaction("earlier work", keptId, 80);
+  const leafId = source.appendContextEdit(summarizedId, null);
+  const plan = planContextClone(source.getEntries(), leafId, {
+    sourceSessionId: source.getSessionId(),
+    model: null,
+    thinkingLevel: "medium",
+  });
+  const target = SessionManager.inMemory("/workspace");
+
+  assert.throws(() => materializeContextCopy(plan, target), /Context edit target is unavailable/);
+  assert.deepEqual(target.getEntries(), []);
+});
+
+test("a context edit targeting non-editable system state fails before target mutation", () => {
+  const source = SessionManager.inMemory("/workspace");
+  const systemId = source.appendMessage({ role: "system", content: "System state", timestamp: 1 });
+  const leafId = "invalid-system-edit";
+  const entries = [...source.getEntries(), {
+    type: "context_edit",
+    id: leafId,
+    parentId: systemId,
+    timestamp: new Date(2).toISOString(),
+    targetId: systemId,
+    replacement: null,
+  } as SessionEntry];
+  const plan = planContextClone(entries, leafId, {
+    sourceSessionId: source.getSessionId(),
+    model: { provider: "openai-codex", modelId: "gpt-test" },
+    thinkingLevel: "high",
+  });
+  const target = SessionManager.inMemory("/workspace");
+
+  assert.throws(() => materializeContextCopy(plan, target), /not editable/);
+  assert.deepEqual(target.getEntries(), []);
+});
+
+test("a context edit targeting a legacy custom message fails before target mutation", () => {
+  const source = SessionManager.inMemory("/workspace");
+  const customId = source.appendMessage({
+    role: "custom",
+    customType: "legacy",
+    content: "Legacy custom message",
+    display: true,
+    timestamp: 1,
+  });
+  const leafId = "invalid-custom-edit";
+  const entries = [...source.getEntries(), {
+    type: "context_edit",
+    id: leafId,
+    parentId: customId,
+    timestamp: new Date(2).toISOString(),
+    targetId: customId,
+    replacement: null,
+  } as SessionEntry];
+  const plan = planContextClone(entries, leafId, {
+    sourceSessionId: source.getSessionId(),
+    model: { provider: "openai-codex", modelId: "gpt-test" },
+    thinkingLevel: "high",
+  });
+  const target = SessionManager.inMemory("/workspace");
+
+  assert.throws(() => materializeContextCopy(plan, target), /not editable/);
+  assert.deepEqual(target.getEntries(), []);
+});
+
 test("a fork rejects prompts whose non-text content cannot be restored as an editor draft", () => {
   const source = SessionManager.inMemory("/workspace");
   const selectedId = source.appendMessage({

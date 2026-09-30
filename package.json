@@ -10,7 +10,7 @@
     "url": "git+https://github.com/peter-monahan/pi-context-copy.git"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.19.0"
   },
   "keywords": ["pi-package"],
   "main": "./dist/index.js",
@@ -32,10 +32,10 @@
     "extensions": ["./src/extension.ts"]
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.80.7"
+    "@earendil-works/pi-coding-agent": ">=0.99.1"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "0.80.7",
+    "@earendil-works/pi-coding-agent": "0.99.1",
     "@types/node": "^22.0.0",
     "typescript": "^5.9.0"
   }
