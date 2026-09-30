@@ -3,6 +3,7 @@ import {
   buildContextEntries,
   type BranchSummaryEntry,
   type CompactionEntry,
+  type ContextEditEntry,
   type CustomMessageEntry,
   type SessionEntry,
   type SessionManager,
@@ -73,6 +74,9 @@ export function materializeContextCopy(
   target.appendThinkingLevelChange(plan.thinkingLevel);
 
   if (plan.compaction) {
+    if (plan.compaction.systemMessage) {
+      target.appendMessage(clone(plan.compaction.systemMessage));
+    }
     for (const entry of plan.retainedEntries) appendContextEntry(target, entry, entryIds);
     const firstKeptId = firstMaterializedId(plan.retainedEntries, entryIds);
     if (!firstKeptId) {
@@ -84,6 +88,7 @@ export function materializeContextCopy(
       plan.compaction.tokensBefore,
       clone(plan.compaction.details),
       plan.compaction.fromHook,
+      clone(plan.compaction.usage),
     );
     entryIds.set(plan.compaction.id, compactionId);
     for (const entry of plan.subsequentEntries) appendContextEntry(target, entry, entryIds);
@@ -137,7 +142,8 @@ function planContextCopy(
   if (firstKeptIndex < 0 || firstKeptIndex >= compactionIndex) {
     throw new Error("Historical compaction has an invalid retained-context boundary");
   }
-  const retainedEntries = branch.slice(firstKeptIndex, compactionIndex);
+  const retainedEntries = branch.slice(firstKeptIndex, compactionIndex).filter((entry) =>
+    !compaction.systemMessage || entry.type !== "message" || entry.message.role !== "system");
   const subsequentEntries = branch.slice(compactionIndex + 1);
 
   return {
@@ -209,6 +215,7 @@ function validateMaterializationPlan(plan: ContextCopyPlan): void {
   if (plan.compaction && !plan.retainedEntries.some(isMaterializedContextEntry)) {
     throw new Error("Cannot materialize a compaction without a retained context entry");
   }
+  const editableSourceIds = new Set<string>();
   for (const entry of [...plan.retainedEntries, ...plan.subsequentEntries]) {
     if (entry.type === "compaction") {
       throw new Error(`Unexpected nested compaction entry: ${entry.id}`);
@@ -216,6 +223,10 @@ function validateMaterializationPlan(plan: ContextCopyPlan): void {
     if (entry.type === "message" && (entry.message.role === "compactionSummary" || entry.message.role === "branchSummary")) {
       throw new Error(`Unsupported summary message entry: ${entry.id}`);
     }
+    if (entry.type === "context_edit" && !editableSourceIds.has(entry.targetId)) {
+      throw new Error(`Context edit target is unavailable or not editable in copied context: ${entry.targetId}`);
+    }
+    if (isContextEditableEntry(entry)) editableSourceIds.add(entry.id);
   }
 }
 
@@ -223,11 +234,18 @@ function isMaterializedContextEntry(entry: SessionEntry): boolean {
   return entry.type === "message" || entry.type === "custom_message" || entry.type === "branch_summary";
 }
 
+function isContextEditableEntry(entry: SessionEntry): boolean {
+  if (entry.type === "custom_message") return true;
+  if (entry.type !== "message") return false;
+  return ["user", "assistant", "toolResult"].includes(entry.message.role);
+}
+
 function appendContextEntry(target: SessionManager, entry: SessionEntry, entryIds: Map<string, string>): void {
   let newId: string | undefined;
   if (entry.type === "message") newId = appendMessage(target, entry);
   else if (entry.type === "custom_message") newId = appendCustomMessage(target, entry);
   else if (entry.type === "branch_summary") newId = appendBranchSummary(target, entry);
+  else if (entry.type === "context_edit") newId = appendContextEdit(target, entry, entryIds);
   if (newId !== undefined) entryIds.set(entry.id, newId);
 }
 
@@ -243,7 +261,23 @@ function appendCustomMessage(target: SessionManager, entry: CustomMessageEntry):
 }
 
 function appendBranchSummary(target: SessionManager, entry: BranchSummaryEntry): string {
-  return target.branchWithSummary(target.getLeafId(), entry.summary, clone(entry.details), entry.fromHook);
+  return target.branchWithSummary(
+    target.getLeafId(),
+    entry.summary,
+    clone(entry.details),
+    entry.fromHook,
+    clone(entry.usage),
+  );
+}
+
+function appendContextEdit(
+  target: SessionManager,
+  entry: ContextEditEntry,
+  entryIds: ReadonlyMap<string, string>,
+): string {
+  const targetId = entryIds.get(entry.targetId);
+  if (!targetId) throw new Error(`Context edit target is unavailable in copied context: ${entry.targetId}`);
+  return target.appendContextEdit(targetId, clone(entry.replacement));
 }
 
 function firstMaterializedId(entries: readonly SessionEntry[], ids: ReadonlyMap<string, string>): string | undefined {
